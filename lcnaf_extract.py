@@ -10,8 +10,9 @@ which yields the identifier ``n00020848``.
 
 The export path is used as a base name: a folder of that name is created and the
 identifiers are written into it as numbered CSV files of 100 rows each. The
-files carry no header row: the first identifier sits in row 1. Entering
-``lcnaf_ids.csv`` produces:
+files carry no header row: the first identifier sits in row 1. Every value is
+trimmed of surrounding whitespace and invisible characters (BOM, zero-width
+spaces, directional marks). Entering ``lcnaf_ids.csv`` produces:
 
     lcnaf_ids/lcnaf_ids_001.csv
     lcnaf_ids/lcnaf_ids_002.csv
@@ -36,15 +37,44 @@ import sys
 DEFAULT_BATCH_SIZE = 100
 QUIT_ANSWERS = ("q", "quit")
 
+# Invisible characters that str.strip() leaves behind because Python does not
+# class them as whitespace. Trimmed from both ends of every extracted id so a
+# stray one never rides along into the CSV.
+INVISIBLE = (
+    "\u00ad"          # soft hyphen
+    "\u180e"          # mongolian vowel separator
+    "\u200b\u200c\u200d"  # zero-width space / non-joiner / joiner
+    "\u200e\u200f"    # left-to-right / right-to-left mark
+    "\u2060"          # word joiner
+    "\ufeff"          # byte-order mark (zero-width no-break space)
+)
+
+# Whitespace or invisible padding, in any mix, around the identifier.
+PAD = r"[\s%s]*" % re.escape(INVISIBLE)
+
 # "# BEGIN /authorities/names/n00020848" -> "n00020848"
-# Tolerates a leading http://id.loc.gov host and any authority scheme segment.
+# Tolerates a leading http://id.loc.gov host, any authority scheme segment, and
+# whitespace or invisible characters padding the identifier on either side.
 BEGIN_RE = re.compile(
     r"^\s*#\s*BEGIN\s+"
     r"(?:https?://[^\s/]+)?"
-    r"/authorities/[^/\s]+/"
-    r"(?P<lcnaf>[^\s/]+)\s*$",
+    r"/authorities/[^/\s]+/" + PAD +
+    r"(?P<lcnaf>[^\s/]+?)" + PAD + r"$",
     re.IGNORECASE,
 )
+
+
+def clean_id(value):
+    """Trim whitespace and invisible characters from both ends of an id.
+
+    Repeats until the value stops shrinking, so a mixed run such as a BOM
+    followed by a space comes off in one call.
+    """
+    previous = None
+    while value != previous:
+        previous = value
+        value = value.strip().strip(INVISIBLE)
+    return value
 
 
 def clean_path(raw):
@@ -114,14 +144,18 @@ def check_export(path):
 
 
 def extract_ids(input_path):
-    """Yield LCNAF identifiers in the order they appear in the file."""
-    with open(input_path, "r", encoding="utf-8", errors="replace") as handle:
+    """Yield trimmed LCNAF identifiers in the order they appear in the file."""
+    # utf-8-sig drops a file-leading BOM that would otherwise hide the first match.
+    with open(input_path, "r", encoding="utf-8-sig", errors="replace") as handle:
         for line in handle:
             if "BEGIN" not in line:          # cheap pre-filter for large files
                 continue
             match = BEGIN_RE.match(line)
-            if match:
-                yield match.group("lcnaf")
+            if not match:
+                continue
+            lcnaf = clean_id(match.group("lcnaf"))
+            if lcnaf:                        # skip a delimiter with an empty id
+                yield lcnaf
 
 
 def existing_batches(folder, stem):
@@ -132,7 +166,8 @@ def existing_batches(folder, stem):
 def write_batches(folder, stem, ids, batch_size):
     """Write ids into folder/stem_NNN.csv files of batch_size rows each.
 
-    The files have no header row, so the first identifier is on row 1.
+    The files have no header row, so the first identifier is on row 1, and
+    every value is written bare with nothing padding either end.
     Returns the list of paths written.
     """
     os.makedirs(folder, exist_ok=True)
