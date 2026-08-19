@@ -9,9 +9,9 @@ e.g.:
 which yields the identifier ``n00020848``.
 
 The export path is used as a base name: a folder of that name is created and the
-identifiers are written into it as numbered CSV files of 100 rows each, every
-file carrying its own ``Column 1`` header. Entering ``lcnaf_ids.csv``
-produces:
+identifiers are written into it as numbered CSV files of 100 rows each. The
+files carry no header row: the first identifier sits in row 1. Entering
+``lcnaf_ids.csv`` produces:
 
     lcnaf_ids/lcnaf_ids_001.csv
     lcnaf_ids/lcnaf_ids_002.csv
@@ -132,7 +132,8 @@ def existing_batches(folder, stem):
 def write_batches(folder, stem, ids, batch_size):
     """Write ids into folder/stem_NNN.csv files of batch_size rows each.
 
-    Every file repeats the 'Column 1' header. Returns the list of paths written.
+    The files have no header row, so the first identifier is on row 1.
+    Returns the list of paths written.
     """
     os.makedirs(folder, exist_ok=True)
     batch_count = (len(ids) + batch_size - 1) // batch_size
@@ -144,7 +145,6 @@ def write_batches(folder, stem, ids, batch_size):
         path = os.path.join(folder, "%s_%0*d.csv" % (stem, width, index + 1))
         with open(path, "w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["Column 1"])
             for lcnaf in chunk:
                 writer.writerow([lcnaf])
         written.append(path)
